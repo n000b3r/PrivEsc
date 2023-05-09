@@ -3,7 +3,7 @@ LinEnum
 
 ## Usage
 ```
-
+./LinEnum.sh
 ```
 
 ## Source
