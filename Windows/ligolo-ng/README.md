@@ -4,13 +4,15 @@ Ligolo-ng
 ## Usage
 ```
 On Kali:
-    sudo ip tuntap add user root mode tun ligolo
-    sudo ip link set ligolo up
     ./proxy_linux64 -selfcert -laddr 0.0.0.0:443 
 
     After client connects:
-        In Ligolo-ng session: ifconfig
-        In Kali terminal: sudo ip route add <internal-subnet> dev ligolo
+        In Ligolo-ng session: 
+            session
+            ifconfig
+            autoroute
+        In event that route already exists, in Kali terminal:
+            sudo ip route del 172.16.218.0/24 dev <interface name> 
 
 On pivot machine:
     .\agent_win64.exe -connect 192.168.45.227:443 -ignore-cert
