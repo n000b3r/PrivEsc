@@ -19,7 +19,7 @@ Get-ChildItem -Path "C:\" -Directory
 
 # 5. Search for flag files on machine
 Write-Host "`n Searching for flags on machine..."
-Get-ChildItem -Path C:\ -Include local.txt,proof.txt -File -Recurse -ErrorAction SilentlyContinue
+Get-ChildItem -Path C:\ -Include local.txt,proof.txt,secret.txt -File -Recurse -ErrorAction SilentlyContinue
 
 # 6. Enumerate Open Ports and Services
 Write-Host "`nEnumerating Open Ports and Services..."
