@@ -7,6 +7,9 @@
     - Generates per-domain files:
       * <domain>_computers.txt
       * <domain>_users.txt
+      * <domain>_unconstrained.txt
+      * <domain>_constrained.txt
+      * <domain>_rbcd.txt
     - Aggregates:
       * potential_users.txt (with Groups column)
       * etc_hosts.txt (aligned, no headers)
@@ -43,7 +46,6 @@ $HostList      = @()
 
 # Process each domain
 foreach ($d in $domains) {
-    # Blank line before each domain processing
     Write-Host ''
     Write-Host "Processing: $d" -ForegroundColor Cyan
 
@@ -60,7 +62,6 @@ foreach ($d in $domains) {
         continue
     }
     $computers = $rawComps | ForEach-Object {
-        # Resolve IP
         try {
             $ip = Resolve-DnsName -Name $_.DnsHostName -Type A -ErrorAction Stop |
                   Select-Object -ExpandProperty IPAddress -First 1
@@ -80,30 +81,72 @@ foreach ($d in $domains) {
       Format-Table Name, FQDN, OS, IP -AutoSize |
       Out-String -Width 120 |
       Out-File $computersFile -Encoding utf8
-
     Write-Host '  Computers file:' -NoNewline; Write-Host " $computersFile" -ForegroundColor Yellow
     Get-Content $computersFile | ForEach-Object { Write-Host "    $_" }
 
     # Accumulate for hosts entries
-    $HostList += $computers | Select-Object IP, @{Name='Hostname';Expression={$_.FQDN}}, @{Name='Alias';Expression={$_.Name}}
+    $HostList += $computers |
+                 Select-Object IP,
+                               @{Name='Hostname';Expression={$_.FQDN}},
+                               @{Name='Alias';Expression={$_.Name}}
 
     # Enumerate users
-    $users = Get-NetUser -Domain $d | Select-Object @{n='User';e={$_.SamAccountName}}, LastLogon
+    $users = Get-NetUser -Domain $d |
+             Select-Object @{n='User';e={$_.SamAccountName}}, LastLogon
 
     # Write aligned users table
     $users |
       Format-Table User, LastLogon -AutoSize |
       Out-String -Width 120 |
       Out-File $usersFile -Encoding utf8
-
     Write-Host '  Users file:' -NoNewline; Write-Host " $usersFile" -ForegroundColor Yellow
     Get-Content $usersFile | ForEach-Object { Write-Host "    $_" }
 
+    # ——————————————
+    # Delegation Checks for this domain:
+
+    # 1) Unconstrained delegation → just output machine Name
+    $uFile = "${d}_unconstrained.txt"
+    Get-DomainComputer -Domain $d -Unconstrained |
+      Select-Object -ExpandProperty Name |
+      Out-File $uFile -Encoding utf8
+    Write-Host "  Unconstrained delegations: $uFile" -ForegroundColor Yellow
+    Get-Content $uFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
+
+    # 2) Constrained delegation → Name : allowed-to-delegate-to targets
+    $cFile = "${d}_constrained.txt"
+    Get-DomainUser -Domain $d -TrustedToAuth |
+      ForEach-Object {
+          "{0} : {1}" -f $_.Name, (($_.'msds-allowedtodelegateto') -join ', ')
+      } |
+      Out-File $cFile -Encoding utf8
+    Write-Host "  Constrained delegations: $cFile" -ForegroundColor Yellow
+    Get-Content $cFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
+
+    # 3) Resource-Based Constrained Delegation (RBCD)
+    $rFile = "${d}_rbcd.txt"
+    Get-DomainComputer -Domain $d |
+      Get-ObjectAcl -ResolveGUIDs |
+      ForEach-Object {
+          $_ | Add-Member -NotePropertyName Identity `
+                        -NotePropertyValue (ConvertFrom-SID $_.SecurityIdentifier.Value) `
+                        -Force
+          $_
+      } |
+      Where-Object { $_.ActiveDirectoryRights -like '*GenericWrite*' } |
+      Out-File $rFile -Encoding utf8
+    Write-Host "  RBCD delegations: $rFile" -ForegroundColor Yellow
+    Get-Content $rFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
+    # ——————————————
+
     # Accumulate potential active users with Groups
-    $activeUsers = $users | Where-Object { $_.LastLogon -is [DateTime] -and $_.LastLogon.Year -gt 1900 }
+    $activeUsers = $users |
+                   Where-Object { $_.LastLogon -is [DateTime] -and $_.LastLogon.Year -gt 1900 }
     if ($activeUsers) {
         foreach ($u in $activeUsers) {
-            # Retrieve groups for each user
             try {
                 $groups = Get-DomainGroup -MemberIdentity $u.User -Domain $d |
                           Select-Object -ExpandProperty SamAccountName
@@ -126,8 +169,6 @@ $PotentialList |
   Format-Table Domain, User, LastLogon, Groups -AutoSize |
   Out-String -Width 200 |
   Out-File 'potential_users.txt' -Encoding utf8
-
-# Display potential users with filename
 Write-Host "`nPotential Users file: potential_users.txt" -ForegroundColor Yellow
 Get-Content 'potential_users.txt' | ForEach-Object { Write-Host "  $_" }
 
@@ -136,9 +177,8 @@ $HostList |
   Format-Table IP, Hostname, Alias -AutoSize -HideTableHeaders |
   Out-String -Width 120 |
   Out-File 'etc_hosts.txt' -Encoding utf8
-
-# Display hosts entries with filename
 Write-Host "`nHosts Entries file: etc_hosts.txt" -ForegroundColor Yellow
 Get-Content 'etc_hosts.txt' | ForEach-Object { Write-Host "  $_" }
 
 Write-Host 'Done!' -ForegroundColor Magenta
+
