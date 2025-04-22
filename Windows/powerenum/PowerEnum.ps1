@@ -129,7 +129,7 @@ foreach ($d in $domains) {
     Get-Content $cFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
 
-    # 3) RBCD delegations
+    # 3) RBCD delegations (Identity: ComputerName)
     $rFile = "${d}_rbcd.txt"
     Get-DomainComputer -Domain $d |
       Get-ObjectAcl -ResolveGUIDs |
@@ -140,6 +140,10 @@ foreach ($d in $domains) {
           $_
       } |
       Where-Object { $_.ActiveDirectoryRights -like '*GenericWrite*' } |
+      ForEach-Object {
+          $comp = ($_.ObjectDN -split ',')[0] -replace '^CN='
+          "{0}: {1}" -f $_.Identity, $comp
+      } |
       Out-File $rFile -Encoding utf8
     Write-Host "  RBCD delegations: $rFile" -ForegroundColor Yellow
     Get-Content $rFile | ForEach-Object { Write-Host "    $_" }
@@ -180,7 +184,7 @@ foreach ($d in $domains) {
     Get-Content $lapsFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
 
-    # 7) LAPS reader groups (only IdentityName)
+    # 7) LAPS reader groups
     $lapsGroupFile = "${d}_laps_group.txt"
     Get-DomainOU -Domain $d |
       Get-DomainObjectAcl -ResolveGUIDs |
