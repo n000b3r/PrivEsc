@@ -10,6 +10,7 @@
       * <domain>_unconstrained.txt
       * <domain>_constrained.txt
       * <domain>_rbcd.txt
+      * <domain>_ForeignGroupMember.txt
     - Aggregates:
       * potential_users.txt (with Groups column)
       * etc_hosts.txt (aligned, no headers)
@@ -139,6 +140,15 @@ foreach ($d in $domains) {
       Out-File $rFile -Encoding utf8
     Write-Host "  RBCD delegations: $rFile" -ForegroundColor Yellow
     Get-Content $rFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
+
+    # 4) Identifying Foreign Group Membership
+    $fgFile = "${d}_ForeignGroupMember.txt"
+    Get-DomainForeignGroupMember -Domain $d |
+      ForEach-Object { Convert-SidToName $_.MemberName } |
+      Out-File $fgFile -Encoding utf8
+    Write-Host "  Foreign group members: $fgFile" -ForegroundColor Yellow
+    Get-Content $fgFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
     # ——————————————
 
