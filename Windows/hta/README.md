@@ -4,6 +4,7 @@ Phishing HTA Reverse Shell
 ## Usage
 ```
 # Use either InstallUtil (bypass_clm_rev_shell.exe) or MsBuild (FullBypass)
+certutil -encode bypass_clm_rev_shell.exe enc.txt
 ```
 
 ## Source
